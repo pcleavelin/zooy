@@ -41,6 +41,9 @@ var root_box: ?*UI_Box = null;
 var current_box: ?*UI_Box = null;
 var pushing_box: bool = false;
 var popping_box: bool = false;
+var mouse_x: i32 = 0;
+var mouse_y: i32 = 0;
+var mouse_released: bool = false;
 
 fn DeleteBoxChildren(box: *UI_Box, should_destroy: bool) void {
     if (box.first) |child| {
@@ -50,8 +53,8 @@ fn DeleteBoxChildren(box: *UI_Box, should_destroy: bool) void {
     }
 }
 
-fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
-    std.debug.print("making box '{s}'...", .{label});
+fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
+    //std.debug.print("making box '{s}'...", .{label});
     popping_box = false;
 
     if (pushing_box) {
@@ -65,16 +68,15 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
         if (box.next) |next| {
             // Attempt to re-use cache
             if (std.mem.eql(u8, next.label, label)) {
-                std.debug.print("using cache for '{s}'\n", .{next.label});
+                //std.debug.print("using cache for '{s}'\n", .{next.label});
                 next.flags = @enumToInt(flags);
                 if (next.parent) |parent| {
                     parent.last = next;
                 }
                 current_box = next;
-                return next;
             } else {
                 // Invalid cache, delete next sibling while retaining the following one
-                std.debug.print("make_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ next.label, label });
+                //std.debug.print("make_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ next.label, label });
                 const following_sibling = next.next;
                 DeleteBoxChildren(next, false);
 
@@ -95,12 +97,10 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
                 if (next.parent) |parent| {
                     parent.last = next;
                 }
-
-                return next;
             }
         } else {
             // No existing cache, create new box
-            std.debug.print("make_box: allocating new box: {s}\n", .{label});
+            //std.debug.print("make_box: allocating new box: {s}\n", .{label});
             var new_box = try box_allocator.create(UI_Box);
             new_box.* = UI_Box{
                 .label = label,
@@ -120,11 +120,9 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
             if (new_box.parent) |parent| {
                 parent.last = new_box;
             }
-
-            return new_box;
         }
     } else {
-        std.debug.print("make_box: allocating new box: {s}\n", .{label});
+        //std.debug.print("make_box: allocating new box: {s}\n", .{label});
         var new_box = try box_allocator.create(UI_Box);
         new_box.* = UI_Box{
             .label = label,
@@ -140,12 +138,19 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
         };
 
         current_box = new_box;
-        return new_box;
     }
+
+    if (current_box) |box| {
+        if (box.flags & @enumToInt(UI_Flags.clickable) > 0) {
+            return TestBoxClick(box);
+        }
+    }
+
+    return false;
 }
 
-fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
-    std.debug.print("pushing box '{s}'...", .{label});
+fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
+    //std.debug.print("pushing box '{s}'...", .{label});
 
     if (popping_box) {
         const box = try MakeBox(label, flags);
@@ -162,17 +167,16 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
         if (box.first) |first| {
             // check if the same
             if (std.mem.eql(u8, first.label, label)) {
-                std.debug.print("using cache for '{s}'\n", .{first.label});
+                //std.debug.print("using cache for '{s}'\n", .{first.label});
                 first.flags = @enumToInt(flags);
                 current_box = first;
 
                 if (first.parent) |parent| {
                     parent.last = first;
                 }
-                return first;
             } else {
                 // Invalid cache
-                std.debug.print("push_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ first.label, label });
+                //std.debug.print("push_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ first.label, label });
                 const following_sibling = first.next;
                 DeleteBoxChildren(first, false);
 
@@ -193,10 +197,9 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
                 if (first.parent) |parent| {
                     parent.last = first;
                 }
-                return first;
             }
         } else {
-            std.debug.print("push_box: allocating new box: {s}\n", .{label});
+            //std.debug.print("push_box: allocating new box: {s}\n", .{label});
             var new_box = try box_allocator.create(UI_Box);
             new_box.* = UI_Box{
                 .label = label,
@@ -216,16 +219,23 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!*UI_Box {
             if (new_box.parent) |parent| {
                 parent.last = new_box;
             }
-            return new_box;
         }
     } else {
         pushing_box = false;
         return try MakeBox(label, flags);
     }
+
+    if (current_box) |box| {
+        if (box.flags & @enumToInt(UI_Flags.clickable) > 0) {
+            return TestBoxClick(box);
+        }
+    }
+
+    return false;
 }
 
 fn PopBox() void {
-    std.debug.print("popping box...", .{});
+    //std.debug.print("popping box...", .{});
     if (current_box) |box| {
         //if (box.parent) |parent| {
         //current_box = parent.last;
@@ -236,21 +246,15 @@ fn PopBox() void {
         return;
     }
 
-    std.debug.print("couldn't pop box\n", .{});
+    //std.debug.print("couldn't pop box\n", .{});
 }
 
-fn TestBoxClick(box: *UI_Box, mouse_x: f32, mouse_y: f32, mouse_clicked: bool) bool {
-    return mouse_clicked and mouse_x >= box.computed_pos.x and mouse_x <= box.computed_pos.x + box.computed_size.x and mouse_y >= box.computed_pos.y and mouse_y <= box.computed_pos.y + box.computed_size.y;
+fn TestBoxClick(box: *UI_Box) bool {
+    return mouse_released and @intToFloat(f32, mouse_x) >= box.computed_pos.x and @intToFloat(f32, mouse_x) <= box.computed_pos.x + box.computed_size.x and @intToFloat(f32, mouse_y) >= box.computed_pos.y and @intToFloat(f32, mouse_y) <= box.computed_pos.y + box.computed_size.y;
 }
 
 fn MakeButton(label: [:0]const u8) !bool {
-    var box = try MakeBox(label, UI_Flags.clickable);
-
-    const mouse_x = 0;
-    const mouse_y = 0;
-    const mouse_clicked = false;
-
-    return TestBoxClick(box, mouse_x, mouse_y, mouse_clicked);
+    return try MakeBox(label, UI_Flags.clickable);
 }
 
 fn CountChildren(box: *UI_Box) u32 {
@@ -282,19 +286,19 @@ fn CountSiblings(box: *UI_Box) u32 {
 fn DrawUI(box: *UI_Box, parent: ?*UI_Box, parent_pos: Vec2, parent_size: Vec2) void {
     //DrawRectangle(int posX, int posY, int width, int height, Color color
 
-    std.debug.print("\n\ndrawing {s}\n", .{box.label});
+    //std.debug.print("\n\ndrawing {s}\n", .{box.label});
 
     const num_siblings = if (parent) |p| (CountChildren(p) - 1) else 0;
-    std.debug.print("num_siblings {d}\n", .{num_siblings});
+    //std.debug.print("num_siblings {d}\n", .{num_siblings});
 
-    const num_children = CountChildren(box);
-    std.debug.print("num_children {d}\n", .{num_children});
+    //const num_children = CountChildren(box);
+    //std.debug.print("num_children {d}\n", .{num_children});
 
     const num_siblings_after_me = CountSiblings(box);
-    std.debug.print("num_siblings_after_me  {d}\n", .{num_siblings_after_me});
+    //std.debug.print("num_siblings_after_me  {d}\n", .{num_siblings_after_me});
 
     const my_index = num_siblings - num_siblings_after_me;
-    std.debug.print("num_index {d}\n", .{my_index});
+    //std.debug.print("num_index {d}\n", .{my_index});
 
     box.computed_size = Vec2{
         .x = parent_size.x / (@intToFloat(f32, num_siblings) + 1),
@@ -329,14 +333,19 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     box_allocator = gpa.allocator();
 
-    root_box = try PushBox("RootContainer", UI_Flags.nothing);
+    _ = try PushBox("RootContainer", UI_Flags.nothing);
+    root_box = current_box;
 
-    std.debug.print("Starting main loop\n", .{});
+    //std.debug.print("Starting main loop\n", .{});
     var ran = false;
     while (!raylib.WindowShouldClose()) {
         current_box = root_box;
         pushing_box = false;
         popping_box = false;
+
+        mouse_x = raylib.GetMouseX();
+        mouse_y = raylib.GetMouseY();
+        mouse_released = raylib.IsMouseButtonReleased(raylib.MouseButton.MOUSE_BUTTON_LEFT);
 
         raylib.BeginDrawing();
         defer raylib.EndDrawing();
@@ -345,10 +354,10 @@ pub fn main() !void {
 
         _ = try PushBox("ButtonArray", UI_Flags.nothing);
         if (try MakeButton("click me")) {
-            std.debug.print("button clicked", .{});
+            std.debug.print("button clicked\n", .{});
         }
         if (try MakeButton("click me 2")) {
-            std.debug.print("button 2 clicked", .{});
+            std.debug.print("button 2 clicked\n", .{});
         }
         PopBox();
 
