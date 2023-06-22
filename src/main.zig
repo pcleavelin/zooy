@@ -63,8 +63,11 @@ fn DeleteBoxChildren(box: *UI_Box, should_destroy: bool) void {
     }
 }
 
+// TODO: remove all footguns by compressing code
 fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerror!bool {
     //std.debug.print("making box '{s}'...", .{label});
+
+    // TODO: Please remove this state machine, there should be a way to do it without it
     popping_box = false;
 
     if (pushing_box) {
@@ -88,7 +91,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerr
             } else {
                 // Invalid cache, delete next sibling while retaining the following one
                 std.debug.print("make_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ next.label, label });
-                //const following_sibling = next.next;
+                const following_sibling = next.next;
                 DeleteBoxChildren(next, false);
 
                 next.* = UI_Box{
@@ -98,8 +101,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerr
 
                     .first = null,
                     .last = null,
-                    // TODO: don't keep this null
-                    .next = null,
+                    .next = following_sibling,
                     .prev = null,
                     .parent = box.parent,
                     .computed_pos = Vec2{ .x = 0, .y = 0 },
@@ -167,6 +169,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerr
 fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerror!bool {
     //std.debug.print("pushing box '{s}'...", .{label});
 
+    // TODO: Please remove this state machine, there should be a way to do it without it
     if (popping_box) {
         const box = try MakeBox(label, flags, direction);
         pushing_box = true;
@@ -193,7 +196,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerr
             } else {
                 // Invalid cache
                 std.debug.print("push_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ first.label, label });
-                //const following_sibling = first.next;
+                const following_sibling = first.next;
                 DeleteBoxChildren(first, false);
 
                 first.* = UI_Box{
@@ -203,8 +206,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerr
 
                     .first = null,
                     .last = null,
-                    // TODO: don't keep this null
-                    .next = null,
+                    .next = following_sibling,
                     .prev = null,
                     .parent = current_box,
                     .computed_pos = Vec2{ .x = 0, .y = 0 },
@@ -328,21 +330,21 @@ fn CountSiblings(box: *UI_Box) u32 {
     return count;
 }
 
-fn DrawUI(box: *UI_Box, parent: ?*UI_Box, parent_pos: Vec2, parent_size: Vec2) void {
+fn DrawUI(box: *UI_Box, parent: ?*UI_Box, my_index: u32, num_siblings: u32, parent_pos: Vec2, parent_size: Vec2) void {
     //DrawRectangle(int posX, int posY, int width, int height, Color color
 
     //std.debug.print("\n\ndrawing {s}\n", .{box.label});
 
-    const num_siblings = if (parent) |p| (CountChildren(p) - 1) else 0;
+    //const num_siblings = if (parent) |p| (CountChildren(p) - 1) else 0;
     //std.debug.print("num_siblings {d}\n", .{num_siblings});
 
     //const num_children = CountChildren(box);
     //std.debug.print("num_children {d}\n", .{num_children});
 
-    const num_siblings_after_me = CountSiblings(box);
+    //const num_siblings_after_me = CountSiblings(box);
     //std.debug.print("num_siblings_after_me  {d}\n", .{num_siblings_after_me});
 
-    const my_index = num_siblings - num_siblings_after_me;
+    //const my_index = num_siblings - num_siblings_after_me;
     //std.debug.print("num_index {d}\n", .{my_index});
 
     if (parent) |p| {
@@ -396,22 +398,28 @@ fn DrawUI(box: *UI_Box, parent: ?*UI_Box, parent_pos: Vec2, parent_size: Vec2) v
         raylib.DrawRectangleLines(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), raylib.BLUE);
     }
     if (box.flags.drawText) {
-        raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), 20, raylib.RED);
+        raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), 10, raylib.RED);
     }
 
     // draw children
-    var child = box.first;
-    while (child) |c| {
-        DrawUI(c, box, box.computed_pos, box.computed_size);
+    const children = CountChildren(box);
+    if (children > 0) {
+        const siblings = children - 1;
+        var index: u32 = 0;
+        var child = box.first;
+        while (child) |c| {
+            DrawUI(c, box, index, siblings, box.computed_pos, box.computed_size);
+            index += 1;
 
-        if (child == box.last) break;
+            if (child == box.last) break;
 
-        child = c.next;
+            child = c.next;
+        }
     }
 }
 
 pub fn main() !void {
-    raylib.InitWindow(800, 600, "Zooy Test");
+    raylib.InitWindow(1280, 720, "Zooy Test");
     raylib.SetConfigFlags(raylib.ConfigFlags{ .FLAG_WINDOW_RESIZABLE = true });
     raylib.SetTargetFPS(60);
 
@@ -462,7 +470,10 @@ pub fn main() !void {
             defer PopBox();
 
             _ = try MakeLabel("This is some text");
-            _ = try MakeLabel("So is this");
+
+            for (0..20) |_| {
+                _ = try MakeLabel("So is this");
+            }
 
             if (show_buttons) {
                 if (try MakeButton("Remove Buttons")) {
@@ -477,7 +488,9 @@ pub fn main() !void {
 
         if (root_box) |box| {
             //std.debug.print("====== STARTING DRAWING =====\n", .{});
-            DrawUI(box, null, .{ .x = 0, .y = 0 }, .{ .x = 800, .y = 600 });
+            DrawUI(box, null, 0, 0, .{ .x = 0, .y = 0 }, .{ .x = 1280, .y = 720 });
         }
+
+        raylib.DrawFPS(0, 600 - 20);
     }
 }
