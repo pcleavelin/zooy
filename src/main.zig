@@ -1,11 +1,21 @@
 const std = @import("std");
 const raylib = @import("raylib");
 
-const UI_Flags = packed struct(u3) {
+const UI_Flags = packed struct(u4) {
     clickable: bool = false,
     drawText: bool = false,
     drawBorder: bool = false,
+    drawBackground: bool = false,
 };
+
+const UI_Direction = enum {
+    leftToRight,
+    rightToLeft,
+    topToBottom,
+    bottomToTop,
+};
+
+const UI_Layout = enum {};
 
 const Vec2 = struct {
     x: f32,
@@ -26,6 +36,7 @@ const UI_Box = struct {
 
     /// the assigned features
     flags: UI_Flags,
+    direction: UI_Direction,
 
     /// the label?
     label: [:0]const u8,
@@ -52,12 +63,12 @@ fn DeleteBoxChildren(box: *UI_Box, should_destroy: bool) void {
     }
 }
 
-fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
+fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerror!bool {
     //std.debug.print("making box '{s}'...", .{label});
     popping_box = false;
 
     if (pushing_box) {
-        const box = try PushBox(label, flags);
+        const box = try PushBox(label, flags, direction);
         pushing_box = false;
 
         return box;
@@ -69,23 +80,26 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
             if (std.mem.eql(u8, next.label, label)) {
                 //std.debug.print("using cache for '{s}'\n", .{next.label});
                 next.flags = flags;
+                next.direction = direction;
                 if (next.parent) |parent| {
                     parent.last = next;
                 }
                 current_box = next;
             } else {
                 // Invalid cache, delete next sibling while retaining the following one
-                //std.debug.print("make_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ next.label, label });
-                const following_sibling = next.next;
+                std.debug.print("make_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ next.label, label });
+                //const following_sibling = next.next;
                 DeleteBoxChildren(next, false);
 
                 next.* = UI_Box{
                     .label = label,
                     .flags = flags,
+                    .direction = direction,
 
                     .first = null,
                     .last = null,
-                    .next = following_sibling,
+                    // TODO: don't keep this null
+                    .next = null,
                     .prev = null,
                     .parent = box.parent,
                     .computed_pos = Vec2{ .x = 0, .y = 0 },
@@ -104,6 +118,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
             new_box.* = UI_Box{
                 .label = label,
                 .flags = flags,
+                .direction = direction,
 
                 .first = null,
                 .last = null,
@@ -126,6 +141,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
         new_box.* = UI_Box{
             .label = label,
             .flags = flags,
+            .direction = direction,
 
             .first = null,
             .last = null,
@@ -148,11 +164,11 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
     return false;
 }
 
-fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
+fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerror!bool {
     //std.debug.print("pushing box '{s}'...", .{label});
 
     if (popping_box) {
-        const box = try MakeBox(label, flags);
+        const box = try MakeBox(label, flags, direction);
         pushing_box = true;
 
         return box;
@@ -168,6 +184,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
             if (std.mem.eql(u8, first.label, label)) {
                 //std.debug.print("using cache for '{s}'\n", .{first.label});
                 first.flags = flags;
+                first.direction = direction;
                 current_box = first;
 
                 if (first.parent) |parent| {
@@ -175,17 +192,19 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
                 }
             } else {
                 // Invalid cache
-                //std.debug.print("push_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ first.label, label });
-                const following_sibling = first.next;
+                std.debug.print("push_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ first.label, label });
+                //const following_sibling = first.next;
                 DeleteBoxChildren(first, false);
 
                 first.* = UI_Box{
                     .label = label,
                     .flags = flags,
+                    .direction = direction,
 
                     .first = null,
                     .last = null,
-                    .next = following_sibling,
+                    // TODO: don't keep this null
+                    .next = null,
                     .prev = null,
                     .parent = current_box,
                     .computed_pos = Vec2{ .x = 0, .y = 0 },
@@ -203,6 +222,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
             new_box.* = UI_Box{
                 .label = label,
                 .flags = flags,
+                .direction = direction,
 
                 .first = null,
                 .last = null,
@@ -221,7 +241,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
         }
     } else {
         pushing_box = false;
-        return try MakeBox(label, flags);
+        return try MakeBox(label, flags, direction);
     }
 
     if (current_box) |box| {
@@ -240,6 +260,9 @@ fn PopBox() void {
         //current_box = parent.last;
         //return;
         //}
+        if (box.parent) |p| {
+            p.last = current_box;
+        }
         current_box = box.parent;
         popping_box = true;
         return;
@@ -257,7 +280,14 @@ fn MakeButton(label: [:0]const u8) !bool {
         .clickable = true,
         .drawText = true,
         .drawBorder = true,
-    });
+        .drawBackground = true,
+    }, .leftToRight);
+}
+
+fn MakeLabel(label: [:0]const u8) !bool {
+    return try MakeBox(label, .{
+        .drawText = true,
+    }, .leftToRight);
 }
 
 fn CountChildren(box: *UI_Box) u32 {
@@ -267,6 +297,8 @@ fn CountChildren(box: *UI_Box) u32 {
     while (b) |child| {
         count += 1;
 
+        // TODO: um, somehow need to trim currently unused tree nodes
+        if (b == box.last) break;
         b = child.next;
     }
 
@@ -276,9 +308,19 @@ fn CountChildren(box: *UI_Box) u32 {
 fn CountSiblings(box: *UI_Box) u32 {
     var count: u32 = 0;
     var b = box;
+    if (b.parent) |p| {
+        if (b == p.last) return 0;
+    }
 
     while (b.next) |next| {
         count += 1;
+
+        if (b.parent) |p| {
+            if (b == p.last) {
+                //std.debug.print("count siblings last askdhfksahdfklhsdaklfhf\n", .{});
+                break;
+            }
+        }
 
         b = next;
     }
@@ -303,28 +345,66 @@ fn DrawUI(box: *UI_Box, parent: ?*UI_Box, parent_pos: Vec2, parent_size: Vec2) v
     const my_index = num_siblings - num_siblings_after_me;
     //std.debug.print("num_index {d}\n", .{my_index});
 
-    box.computed_size = Vec2{
-        .x = parent_size.x / (@intToFloat(f32, num_siblings) + 1),
-        .y = parent_size.y,
-        //.y = parent_size.y / (@intToFloat(f32, num_siblings) + 1),
-    };
-    box.computed_pos = Vec2{
-        .x = box.computed_size.x * @intToFloat(f32, my_index) + parent_pos.x,
-        .y = parent_pos.y,
-        //.y = box.computed_size.y * @intToFloat(f32, my_index) + parent_pos.y,
-    };
+    if (parent) |p| {
+        box.computed_size = Vec2{
+            .x = switch (p.direction) {
+                .leftToRight => parent_size.x / (@intToFloat(f32, num_siblings) + 1),
+                .rightToLeft => unreachable,
+                .topToBottom => parent_size.x,
+                .bottomToTop => unreachable,
+            },
+            .y = switch (p.direction) {
+                .leftToRight => parent_size.y,
+                .rightToLeft => unreachable,
+                .topToBottom => parent_size.y / (@intToFloat(f32, num_siblings) + 1),
+                .bottomToTop => unreachable,
+            },
+        };
+    } else {
+        box.computed_size = Vec2{
+            .x = parent_size.x,
+            .y = parent_size.y,
+        };
+    }
 
+    if (parent) |p| {
+        box.computed_pos = Vec2{
+            .x = switch (p.direction) {
+                .leftToRight => box.computed_size.x * @intToFloat(f32, my_index) + parent_pos.x,
+                .rightToLeft => unreachable,
+                .topToBottom => parent_pos.x,
+                .bottomToTop => unreachable,
+            },
+            .y = switch (p.direction) {
+                .leftToRight => parent_pos.y,
+                .rightToLeft => unreachable,
+                .topToBottom => box.computed_size.y * @intToFloat(f32, my_index) + parent_pos.y,
+                .bottomToTop => unreachable,
+            },
+        };
+    } else {
+        box.computed_pos = Vec2{
+            .x = parent_pos.x,
+            .y = parent_pos.y,
+        };
+    }
+
+    if (box.flags.drawBackground) {
+        raylib.DrawRectangle(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), raylib.DARKGRAY);
+    }
     if (box.flags.drawBorder) {
         raylib.DrawRectangleLines(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), raylib.BLUE);
     }
     if (box.flags.drawText) {
-        raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), 10, raylib.RED);
+        raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), 20, raylib.RED);
     }
 
     // draw children
     var child = box.first;
     while (child) |c| {
         DrawUI(c, box, box.computed_pos, box.computed_size);
+
+        if (child == box.last) break;
 
         child = c.next;
     }
@@ -340,11 +420,13 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     box_allocator = gpa.allocator();
 
-    _ = try PushBox("RootContainer", .{});
+    _ = try PushBox("RootContainer", .{}, .leftToRight);
     root_box = current_box;
 
     //std.debug.print("Starting main loop\n", .{});
-    var ran = false;
+    var other_button_shown = false;
+    var show_buttons = true;
+    var dir: UI_Direction = .topToBottom;
     while (!raylib.WindowShouldClose()) {
         current_box = root_box;
         pushing_box = false;
@@ -359,34 +441,43 @@ pub fn main() !void {
 
         raylib.ClearBackground(raylib.BLACK);
 
-        _ = try PushBox("ButtonArray", .{});
-        if (try MakeButton("click me")) {
-            std.debug.print("button clicked\n", .{});
-        }
-        if (try MakeButton("click me 2")) {
-            std.debug.print("button 2 clicked\n", .{});
-        }
-        PopBox();
+        if (show_buttons) {
+            _ = try PushBox("ButtonArray", .{}, dir);
+            defer PopBox();
 
-        _ = try PushBox("TextArray", .{});
-        if (try MakeBox("This is some text", .{
-            .drawText = true,
-            .clickable = true,
-        })) {
-            std.debug.print("text clicked\n", .{});
+            if (try MakeButton("Show Labels")) {
+                other_button_shown = !other_button_shown;
+            }
+            if (try MakeButton("Switch Direction")) {
+                if (dir == .topToBottom) {
+                    dir = .leftToRight;
+                } else {
+                    dir = .topToBottom;
+                }
+            }
         }
-        _ = try MakeBox("So is this", .{ .drawText = true });
-        PopBox();
+
+        if (other_button_shown) {
+            _ = try PushBox("TextArray", .{}, dir);
+            defer PopBox();
+
+            _ = try MakeLabel("This is some text");
+            _ = try MakeLabel("So is this");
+
+            if (show_buttons) {
+                if (try MakeButton("Remove Buttons")) {
+                    show_buttons = false;
+                }
+            } else {
+                if (try MakeButton("Show Buttons")) {
+                    show_buttons = true;
+                }
+            }
+        }
 
         if (root_box) |box| {
+            //std.debug.print("====== STARTING DRAWING =====\n", .{});
             DrawUI(box, null, .{ .x = 0, .y = 0 }, .{ .x = 800, .y = 600 });
         }
-
-        // raylib.DrawFPS(10, 10);
-
-        //raylib.DrawText("Hello Zooy", 100, 100, 20, raylib.YELLOW);
-
-        //if (ran) break;
-        ran = true;
     }
 }
