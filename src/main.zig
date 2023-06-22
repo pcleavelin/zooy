@@ -1,11 +1,10 @@
 const std = @import("std");
 const raylib = @import("raylib");
 
-const UI_Flags = enum(u32) {
-    nothing = 0,
-    clickable = (1 << 0),
-    drawText = (1 << 1),
-    drawBorder = (1 << 2),
+const UI_Flags = packed struct(u3) {
+    clickable: bool = false,
+    drawText: bool = false,
+    drawBorder: bool = false,
 };
 
 const Vec2 = struct {
@@ -26,7 +25,7 @@ const UI_Box = struct {
     parent: ?*UI_Box,
 
     /// the assigned features
-    flags: u32,
+    flags: UI_Flags,
 
     /// the label?
     label: [:0]const u8,
@@ -69,7 +68,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
             // Attempt to re-use cache
             if (std.mem.eql(u8, next.label, label)) {
                 //std.debug.print("using cache for '{s}'\n", .{next.label});
-                next.flags = @enumToInt(flags);
+                next.flags = flags;
                 if (next.parent) |parent| {
                     parent.last = next;
                 }
@@ -82,7 +81,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
 
                 next.* = UI_Box{
                     .label = label,
-                    .flags = @enumToInt(flags),
+                    .flags = flags,
 
                     .first = null,
                     .last = null,
@@ -104,7 +103,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
             var new_box = try box_allocator.create(UI_Box);
             new_box.* = UI_Box{
                 .label = label,
-                .flags = @enumToInt(flags),
+                .flags = flags,
 
                 .first = null,
                 .last = null,
@@ -126,7 +125,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
         var new_box = try box_allocator.create(UI_Box);
         new_box.* = UI_Box{
             .label = label,
-            .flags = @enumToInt(flags),
+            .flags = flags,
 
             .first = null,
             .last = null,
@@ -141,7 +140,7 @@ fn MakeBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
     }
 
     if (current_box) |box| {
-        if (box.flags & @enumToInt(UI_Flags.clickable) > 0) {
+        if (box.flags.clickable) {
             return TestBoxClick(box);
         }
     }
@@ -168,7 +167,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
             // check if the same
             if (std.mem.eql(u8, first.label, label)) {
                 //std.debug.print("using cache for '{s}'\n", .{first.label});
-                first.flags = @enumToInt(flags);
+                first.flags = flags;
                 current_box = first;
 
                 if (first.parent) |parent| {
@@ -182,7 +181,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
 
                 first.* = UI_Box{
                     .label = label,
-                    .flags = @enumToInt(flags),
+                    .flags = flags,
 
                     .first = null,
                     .last = null,
@@ -203,7 +202,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
             var new_box = try box_allocator.create(UI_Box);
             new_box.* = UI_Box{
                 .label = label,
-                .flags = @enumToInt(flags),
+                .flags = flags,
 
                 .first = null,
                 .last = null,
@@ -226,7 +225,7 @@ fn PushBox(label: [:0]const u8, flags: UI_Flags) anyerror!bool {
     }
 
     if (current_box) |box| {
-        if (box.flags & @enumToInt(UI_Flags.clickable) > 0) {
+        if (box.flags.clickable) {
             return TestBoxClick(box);
         }
     }
@@ -254,7 +253,11 @@ fn TestBoxClick(box: *UI_Box) bool {
 }
 
 fn MakeButton(label: [:0]const u8) !bool {
-    return try MakeBox(label, UI_Flags.clickable);
+    return try MakeBox(label, .{
+        .clickable = true,
+        .drawText = true,
+        .drawBorder = true,
+    });
 }
 
 fn CountChildren(box: *UI_Box) u32 {
@@ -307,12 +310,16 @@ fn DrawUI(box: *UI_Box, parent: ?*UI_Box, parent_pos: Vec2, parent_size: Vec2) v
     };
     box.computed_pos = Vec2{
         .x = box.computed_size.x * @intToFloat(f32, my_index) + parent_pos.x,
-        .y = parent_pos.y + 12,
+        .y = parent_pos.y,
         //.y = box.computed_size.y * @intToFloat(f32, my_index) + parent_pos.y,
     };
 
-    raylib.DrawRectangleLines(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), raylib.BLUE);
-    raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), 10, raylib.RED);
+    if (box.flags.drawBorder) {
+        raylib.DrawRectangleLines(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), raylib.BLUE);
+    }
+    if (box.flags.drawText) {
+        raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), 10, raylib.RED);
+    }
 
     // draw children
     var child = box.first;
@@ -333,7 +340,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     box_allocator = gpa.allocator();
 
-    _ = try PushBox("RootContainer", UI_Flags.nothing);
+    _ = try PushBox("RootContainer", .{});
     root_box = current_box;
 
     //std.debug.print("Starting main loop\n", .{});
@@ -352,7 +359,7 @@ pub fn main() !void {
 
         raylib.ClearBackground(raylib.BLACK);
 
-        _ = try PushBox("ButtonArray", UI_Flags.nothing);
+        _ = try PushBox("ButtonArray", .{});
         if (try MakeButton("click me")) {
             std.debug.print("button clicked\n", .{});
         }
@@ -361,9 +368,14 @@ pub fn main() !void {
         }
         PopBox();
 
-        _ = try PushBox("TextArray", UI_Flags.nothing);
-        _ = try MakeBox("This is some text", UI_Flags.nothing);
-        _ = try MakeBox("So is this", UI_Flags.nothing);
+        _ = try PushBox("TextArray", .{});
+        if (try MakeBox("This is some text", .{
+            .drawText = true,
+            .clickable = true,
+        })) {
+            std.debug.print("text clicked\n", .{});
+        }
+        _ = try MakeBox("So is this", .{ .drawText = true });
         PopBox();
 
         if (root_box) |box| {
