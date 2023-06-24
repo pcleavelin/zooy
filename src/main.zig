@@ -39,7 +39,7 @@ pub fn main() !void {
         raylib.ClearBackground(raylib.BLACK);
 
         if (show_buttons) {
-            _ = try ui.PushBox("ButtonArray", .{}, dir);
+            _ = try ui.PushBox("ButtonArray", .{}, .topToBottom);
             defer ui.PopBox();
 
             if (try ui.MakeButton("Show Labels")) {
@@ -57,6 +57,8 @@ pub fn main() !void {
         if (other_button_shown) {
             _ = try ui.PushBox("TextArray", .{}, dir);
             defer ui.PopBox();
+            try ui.PushStyle(.{ .text_color = raylib.YELLOW });
+            defer ui.PopStyle();
 
             _ = try ui.MakeLabel("This is some text");
 
@@ -64,8 +66,9 @@ pub fn main() !void {
                 try ui.PushStyle(.{ .hover_color = raylib.SKYBLUE });
                 defer ui.PopStyle();
 
-                for (0..20) |_| {
+                for (0..10) |_| {
                     _ = try ui.MakeButton("So is this");
+                    _ = try ui.MakeBox("spacer", .{}, dir);
                 }
             }
 

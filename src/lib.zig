@@ -32,9 +32,14 @@ pub const UI_Direction = enum {
     bottomToTop,
 };
 
+// TODO: don't couple to raylib
 pub const UI_Style = struct {
-    // TODO: don't couple to raylib
-    hover_color: raylib.Color,
+    color: raylib.Color = raylib.LIGHTGRAY,
+    hover_color: raylib.Color = raylib.WHITE,
+    border_color: raylib.Color = raylib.DARKGRAY,
+
+    text_color: raylib.Color = raylib.BLACK,
+    text_size: i32 = 20,
 };
 
 pub const Vec2 = struct {
@@ -422,15 +427,15 @@ pub fn DrawUI(box: *UI_Box, parent: ?*UI_Box, my_index: u32, num_siblings: u32, 
     }
 
     if (box.flags.drawBackground) {
-        const color = if (TestBoxHover(box)) box.style.hover_color else raylib.DARKGRAY;
+        const color = if (TestBoxHover(box)) box.style.hover_color else box.style.color;
 
         raylib.DrawRectangle(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), color);
     }
     if (box.flags.drawBorder) {
-        raylib.DrawRectangleLines(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), raylib.BLUE);
+        raylib.DrawRectangleLines(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), box.style.border_color);
     }
     if (box.flags.drawText) {
-        raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), 10, raylib.RED);
+        raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), box.style.text_size, box.style.text_color);
     }
 
     // draw children
