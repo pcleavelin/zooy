@@ -1,7 +1,8 @@
 const std = @import("std");
 
-// TODO: abstract raylib away to allow for consumers to use whatever they want
-const raylib = @import("raylib");
+// TODO: abstract raylib away to allow for consumers to use whatever they want.
+// I'm also rexporting here because the zig build system hurts
+pub const raylib = @import("raylib");
 
 // TODO: don't just make these public
 pub var box_allocator: std.mem.Allocator = undefined;
