@@ -12,6 +12,9 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     ui.box_allocator = gpa.allocator();
 
+    ui.current_style = @TypeOf(ui.current_style).init(ui.box_allocator);
+    try ui.current_style.append(.{ .hover_color = raylib.WHITE });
+
     _ = try ui.PushBox("RootContainer", .{}, .leftToRight);
     ui.root_box = ui.current_box;
 
@@ -23,6 +26,8 @@ pub fn main() !void {
         ui.current_box = ui.root_box;
         ui.pushing_box = false;
         ui.popping_box = false;
+        ui.current_style.clearRetainingCapacity();
+        try ui.current_style.append(.{ .hover_color = raylib.WHITE });
 
         ui.mouse_x = raylib.GetMouseX();
         ui.mouse_y = raylib.GetMouseY();
@@ -55,10 +60,16 @@ pub fn main() !void {
 
             _ = try ui.MakeLabel("This is some text");
 
-            for (0..20) |_| {
-                _ = try ui.MakeLabel("So is this");
+            {
+                try ui.PushStyle(.{ .hover_color = raylib.SKYBLUE });
+                defer ui.PopStyle();
+
+                for (0..20) |_| {
+                    _ = try ui.MakeButton("So is this");
+                }
             }
 
+            try ui.PushStyle(.{ .hover_color = raylib.GREEN });
             if (show_buttons) {
                 if (try ui.MakeButton("Remove Buttons")) {
                     show_buttons = false;
@@ -68,6 +79,7 @@ pub fn main() !void {
                     show_buttons = true;
                 }
             }
+            ui.PopStyle();
         }
 
         if (ui.root_box) |box| {

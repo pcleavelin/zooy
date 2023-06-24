@@ -5,16 +5,21 @@ const raylib = @import("raylib");
 
 // TODO: don't just make these public
 pub var box_allocator: std.mem.Allocator = undefined;
+
 pub var root_box: ?*UI_Box = null;
 pub var current_box: ?*UI_Box = null;
+pub var current_style: std.ArrayList(UI_Style) = undefined;
+
 pub var pushing_box: bool = false;
 pub var popping_box: bool = false;
+
 pub var mouse_x: i32 = 0;
 pub var mouse_y: i32 = 0;
 pub var mouse_released: bool = false;
 
-pub const UI_Flags = packed struct(u4) {
+pub const UI_Flags = packed struct(u5) {
     clickable: bool = false,
+    hoverable: bool = false,
     drawText: bool = false,
     drawBorder: bool = false,
     drawBackground: bool = false,
@@ -27,7 +32,10 @@ pub const UI_Direction = enum {
     bottomToTop,
 };
 
-pub const UI_Layout = enum {};
+pub const UI_Style = struct {
+    // TODO: don't couple to raylib
+    hover_color: raylib.Color,
+};
 
 pub const Vec2 = struct {
     x: f32,
@@ -49,6 +57,7 @@ pub const UI_Box = struct {
     /// the assigned features
     flags: UI_Flags,
     direction: UI_Direction,
+    style: UI_Style,
 
     /// the label?
     label: [:0]const u8,
@@ -96,8 +105,12 @@ fn CountSiblings(box: *UI_Box) u32 {
     return count;
 }
 
+fn TestBoxHover(box: *UI_Box) bool {
+    return @intToFloat(f32, mouse_x) >= box.computed_pos.x and @intToFloat(f32, mouse_x) <= box.computed_pos.x + box.computed_size.x and @intToFloat(f32, mouse_y) >= box.computed_pos.y and @intToFloat(f32, mouse_y) <= box.computed_pos.y + box.computed_size.y;
+}
+
 fn TestBoxClick(box: *UI_Box) bool {
-    return mouse_released and @intToFloat(f32, mouse_x) >= box.computed_pos.x and @intToFloat(f32, mouse_x) <= box.computed_pos.x + box.computed_size.x and @intToFloat(f32, mouse_y) >= box.computed_pos.y and @intToFloat(f32, mouse_y) <= box.computed_pos.y + box.computed_size.y;
+    return mouse_released and TestBoxHover(box);
 }
 
 pub fn DeleteBoxChildren(box: *UI_Box, should_destroy: bool) void {
@@ -143,6 +156,7 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
                     .label = label,
                     .flags = flags,
                     .direction = direction,
+                    .style = current_style.getLast(),
 
                     .first = null,
                     .last = null,
@@ -166,6 +180,7 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
                 .label = label,
                 .flags = flags,
                 .direction = direction,
+                .style = current_style.getLast(),
 
                 .first = null,
                 .last = null,
@@ -189,6 +204,7 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
             .label = label,
             .flags = flags,
             .direction = direction,
+            .style = current_style.getLast(),
 
             .first = null,
             .last = null,
@@ -248,6 +264,7 @@ pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
                     .label = label,
                     .flags = flags,
                     .direction = direction,
+                    .style = current_style.getLast(),
 
                     .first = null,
                     .last = null,
@@ -270,6 +287,7 @@ pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
                 .label = label,
                 .flags = flags,
                 .direction = direction,
+                .style = current_style.getLast(),
 
                 .first = null,
                 .last = null,
@@ -318,9 +336,18 @@ pub fn PopBox() void {
     //std.debug.print("couldn't pop box\n", .{});
 }
 
+pub fn PushStyle(style: UI_Style) !void {
+    try current_style.append(style);
+}
+
+pub fn PopStyle() void {
+    _ = current_style.popOrNull();
+}
+
 pub fn MakeButton(label: [:0]const u8) !bool {
     return try MakeBox(label, .{
         .clickable = true,
+        .hoverable = true,
         .drawText = true,
         .drawBorder = true,
         .drawBackground = true,
@@ -395,7 +422,9 @@ pub fn DrawUI(box: *UI_Box, parent: ?*UI_Box, my_index: u32, num_siblings: u32, 
     }
 
     if (box.flags.drawBackground) {
-        raylib.DrawRectangle(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), raylib.DARKGRAY);
+        const color = if (TestBoxHover(box)) box.style.hover_color else raylib.DARKGRAY;
+
+        raylib.DrawRectangle(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), color);
     }
     if (box.flags.drawBorder) {
         raylib.DrawRectangleLines(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), raylib.BLUE);
