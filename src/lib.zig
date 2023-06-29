@@ -17,6 +17,7 @@ pub var popping_box: bool = false;
 pub var mouse_x: i32 = 0;
 pub var mouse_y: i32 = 0;
 pub var mouse_released: bool = false;
+pub var mouse_hovering_clickable: bool = false;
 
 pub const UI_Flags = packed struct(u5) {
     clickable: bool = false,
@@ -25,6 +26,8 @@ pub const UI_Flags = packed struct(u5) {
     drawBorder: bool = false,
     drawBackground: bool = false,
 };
+
+pub const UI_Layout = union(enum) { fitToText, fitToChildren, fill, exactSize: Vec2 };
 
 pub const UI_Direction = enum {
     leftToRight,
@@ -41,6 +44,7 @@ pub const UI_Style = struct {
 
     text_color: raylib.Color = raylib.BLACK,
     text_size: i32 = 20,
+    text_padding: i32 = 8,
 };
 
 pub const Vec2 = struct {
@@ -48,7 +52,6 @@ pub const Vec2 = struct {
     y: f32,
 };
 
-/// the most (and only) basic primitive
 pub const UI_Box = struct {
     /// the first child
     first: ?*UI_Box,
@@ -64,11 +67,12 @@ pub const UI_Box = struct {
     flags: UI_Flags,
     direction: UI_Direction,
     style: UI_Style,
+    layout: UI_Layout,
 
     /// the label?
     label: [:0]const u8,
 
-    /// the final computed position and size of this primitive
+    /// the final computed position and size of this primitive (in pixels)
     computed_pos: Vec2,
     computed_size: Vec2,
 };
@@ -80,7 +84,7 @@ fn CountChildren(box: *UI_Box) u32 {
     while (b) |child| {
         count += 1;
 
-        // TODO: um, somehow need to trim currently unused tree nodes
+        // TODO: um, somehow need to trim stale tree nodes
         if (b == box.last) break;
         b = child.next;
     }
@@ -100,7 +104,6 @@ fn CountSiblings(box: *UI_Box) u32 {
 
         if (b.parent) |p| {
             if (b == p.last) {
-                //std.debug.print("count siblings last askdhfksahdfklhsdaklfhf\n", .{});
                 break;
             }
         }
@@ -128,14 +131,14 @@ pub fn DeleteBoxChildren(box: *UI_Box, should_destroy: bool) void {
 }
 
 // TODO: remove all footguns by compressing code
-pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerror!bool {
+pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction, layout: UI_Layout) anyerror!bool {
     //std.debug.print("making box '{s}'...", .{label});
 
     // TODO: Please remove this state machine, there should be a way to do it without it
     popping_box = false;
 
     if (pushing_box) {
-        const box = try PushBox(label, flags, direction);
+        const box = try PushBox(label, flags, direction, layout);
         pushing_box = false;
 
         return box;
@@ -163,11 +166,12 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
                     .flags = flags,
                     .direction = direction,
                     .style = current_style.getLast(),
+                    .layout = layout,
 
                     .first = null,
                     .last = null,
                     .next = following_sibling,
-                    .prev = null,
+                    .prev = box,
                     .parent = box.parent,
                     .computed_pos = Vec2{ .x = 0, .y = 0 },
                     .computed_size = Vec2{ .x = 0, .y = 0 },
@@ -180,18 +184,19 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
             }
         } else {
             // No existing cache, create new box
-            //std.debug.print("make_box: allocating new box: {s}\n", .{label});
+            std.debug.print("make_box: allocating new box: {s}\n", .{label});
             var new_box = try box_allocator.create(UI_Box);
             new_box.* = UI_Box{
                 .label = label,
                 .flags = flags,
                 .direction = direction,
                 .style = current_style.getLast(),
+                .layout = layout,
 
                 .first = null,
                 .last = null,
                 .next = null,
-                .prev = null,
+                .prev = box,
                 .parent = box.parent,
                 .computed_pos = Vec2{ .x = 0, .y = 0 },
                 .computed_size = Vec2{ .x = 0, .y = 0 },
@@ -204,13 +209,14 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
             }
         }
     } else {
-        //std.debug.print("make_box: allocating new box: {s}\n", .{label});
+        std.debug.print("make_box: allocating new box: {s}\n", .{label});
         var new_box = try box_allocator.create(UI_Box);
         new_box.* = UI_Box{
             .label = label,
             .flags = flags,
             .direction = direction,
             .style = current_style.getLast(),
+            .layout = layout,
 
             .first = null,
             .last = null,
@@ -233,12 +239,12 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
     return false;
 }
 
-pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) anyerror!bool {
+pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction, layout: UI_Layout) anyerror!bool {
     //std.debug.print("pushing box '{s}'...", .{label});
 
     // TODO: Please remove this state machine, there should be a way to do it without it
     if (popping_box) {
-        const box = try MakeBox(label, flags, direction);
+        const box = try MakeBox(label, flags, direction, layout);
         pushing_box = true;
 
         return box;
@@ -271,6 +277,7 @@ pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
                     .flags = flags,
                     .direction = direction,
                     .style = current_style.getLast(),
+                    .layout = layout,
 
                     .first = null,
                     .last = null,
@@ -287,13 +294,14 @@ pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
                 }
             }
         } else {
-            //std.debug.print("push_box: allocating new box: {s}\n", .{label});
+            std.debug.print("push_box: allocating new box: {s}\n", .{label});
             var new_box = try box_allocator.create(UI_Box);
             new_box.* = UI_Box{
                 .label = label,
                 .flags = flags,
                 .direction = direction,
                 .style = current_style.getLast(),
+                .layout = layout,
 
                 .first = null,
                 .last = null,
@@ -312,7 +320,7 @@ pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction) an
         }
     } else {
         pushing_box = false;
-        return try MakeBox(label, flags, direction);
+        return try MakeBox(label, flags, direction, layout);
     }
 
     if (current_box) |box| {
@@ -355,99 +363,175 @@ pub fn MakeButton(label: [:0]const u8) !bool {
         .clickable = true,
         .hoverable = true,
         .drawText = true,
-        .drawBorder = true,
         .drawBackground = true,
-    }, .leftToRight);
+    }, .leftToRight, .fitToText);
 }
 
-pub fn MakeLabel(label: [:0]const u8) !bool {
-    return try MakeBox(label, .{
+pub fn MakeLabel(label: [:0]const u8) !void {
+    _ = try MakeBox(label, .{
         .drawText = true,
-    }, .leftToRight);
+    }, .leftToRight, .fitToText);
 }
 
-pub fn DrawUI(box: *UI_Box, parent: ?*UI_Box, my_index: u32, num_siblings: u32, parent_pos: Vec2, parent_size: Vec2) void {
-    //DrawRectangle(int posX, int posY, int width, int height, Color color
+pub fn ComputeLayout(box: *UI_Box) Vec2 {
+    if (box.parent) |p| {
+        box.computed_size = p.computed_size;
 
-    //std.debug.print("\n\ndrawing {s}\n", .{box.label});
-
-    //const num_siblings = if (parent) |p| (CountChildren(p) - 1) else 0;
-    //std.debug.print("num_siblings {d}\n", .{num_siblings});
-
-    //const num_children = CountChildren(box);
-    //std.debug.print("num_children {d}\n", .{num_children});
-
-    //const num_siblings_after_me = CountSiblings(box);
-    //std.debug.print("num_siblings_after_me  {d}\n", .{num_siblings_after_me});
-
-    //const my_index = num_siblings - num_siblings_after_me;
-    //std.debug.print("num_index {d}\n", .{my_index});
-
-    if (parent) |p| {
-        box.computed_size = Vec2{
-            .x = switch (p.direction) {
-                .leftToRight => parent_size.x / (@intToFloat(f32, num_siblings) + 1),
-                .rightToLeft => unreachable,
-                .topToBottom => parent_size.x,
-                .bottomToTop => unreachable,
-            },
-            .y = switch (p.direction) {
-                .leftToRight => parent_size.y,
-                .rightToLeft => unreachable,
-                .topToBottom => parent_size.y / (@intToFloat(f32, num_siblings) + 1),
-                .bottomToTop => unreachable,
-            },
-        };
-    } else {
-        box.computed_size = Vec2{
-            .x = parent_size.x,
-            .y = parent_size.y,
-        };
+        if (box.prev) |prev| {
+            box.computed_pos = Vec2{ .x = switch (p.direction) {
+                .leftToRight => prev.computed_pos.x + prev.computed_size.x,
+                .topToBottom => prev.computed_pos.x,
+                .rightToLeft, .bottomToTop => unreachable,
+            }, .y = switch (p.direction) {
+                .leftToRight => prev.computed_pos.y,
+                .topToBottom => prev.computed_pos.y + prev.computed_size.y,
+                .rightToLeft, .bottomToTop => unreachable,
+            } };
+        } else {
+            box.computed_pos = p.computed_pos;
+        }
     }
 
-    if (parent) |p| {
-        box.computed_pos = Vec2{
-            .x = switch (p.direction) {
-                .leftToRight => box.computed_size.x * @intToFloat(f32, my_index) + parent_pos.x,
-                .rightToLeft => unreachable,
-                .topToBottom => parent_pos.x,
-                .bottomToTop => unreachable,
-            },
-            .y = switch (p.direction) {
-                .leftToRight => parent_pos.y,
-                .rightToLeft => unreachable,
-                .topToBottom => box.computed_size.y * @intToFloat(f32, my_index) + parent_pos.y,
-                .bottomToTop => unreachable,
-            },
-        };
-    } else {
-        box.computed_pos = Vec2{
-            .x = parent_pos.x,
-            .y = parent_pos.y,
-        };
+    var total_size = Vec2{ .x = 0, .y = 0 };
+    // TODO: make this block an iterator
+    const children = CountChildren(box);
+    if (children > 0) {
+        var child = box.first;
+        while (child) |c| {
+            const child_size = ComputeLayout(c);
+
+            switch (box.direction) {
+                .leftToRight => {
+                    total_size.x += child_size.x;
+
+                    // only grab max size for this direction
+                    if (child_size.y > total_size.y) {
+                        total_size.y = child_size.y;
+                    }
+                },
+                .topToBottom => {
+                    total_size.y += child_size.y;
+
+                    // only grab max size for this direction
+                    if (child_size.x > total_size.x) {
+                        total_size.x = child_size.x;
+                    }
+                },
+                .rightToLeft, .bottomToTop => {},
+            }
+
+            if (child == box.last) break;
+
+            child = c.next;
+        }
     }
 
+    switch (box.layout) {
+        .fitToText => {
+            box.computed_size = Vec2{
+                .x = @intToFloat(f32, raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2),
+                .y = @intToFloat(f32, box.style.text_size + box.style.text_padding * 2),
+            };
+        },
+        .fitToChildren => {
+            box.computed_size = total_size;
+        },
+        .fill => {
+            // get siblings size so we know to big to get
+            var total_sibling_size = Vec2{ .x = 0, .y = 0 };
+            var n = box.next;
+            while (n) |next| {
+                const sibling_size = ComputeLayout(next);
+
+                switch (box.direction) {
+                    .leftToRight => {
+                        total_sibling_size.x += sibling_size.x;
+                        if (sibling_size.y > total_sibling_size.y) {
+                            total_sibling_size.y = sibling_size.y;
+                        }
+                    },
+                    .topToBottom => {
+                        total_sibling_size.y += sibling_size.y;
+                        if (sibling_size.x > total_sibling_size.x) {
+                            total_sibling_size.x = sibling_size.x;
+                        }
+                    },
+                    .rightToLeft, .bottomToTop => {},
+                }
+
+                if (box.parent) |p| {
+                    if (next == p.last) break;
+                }
+
+                n = next.next;
+            }
+
+            if (box.parent) |p| {
+                box.computed_size = Vec2{
+                    .x = switch (p.direction) {
+                        .leftToRight => p.computed_size.x - total_sibling_size.x - box.computed_pos.x,
+                        .topToBottom => total_sibling_size.x,
+                        .rightToLeft, .bottomToTop => unreachable,
+                    },
+                    .y = switch (p.direction) {
+                        .leftToRight => total_sibling_size.y,
+                        .topToBottom => p.computed_size.y - total_sibling_size.y - box.computed_pos.y,
+                        .rightToLeft, .bottomToTop => unreachable,
+                    },
+                };
+            } else {
+                // TODO: somehow need to get these values
+                box.computed_size = Vec2{ .x = 1280, .y = 720 };
+            }
+        },
+        .exactSize => |_| unreachable,
+    }
+
+    return box.computed_size;
+}
+
+pub fn DrawUI(box: *UI_Box) void {
     if (box.flags.drawBackground) {
-        const color = if (TestBoxHover(box)) box.style.hover_color else box.style.color;
+        const is_hovering = TestBoxHover(box);
+        const color = if (box.flags.hoverable and is_hovering) box.style.hover_color else box.style.color;
 
-        raylib.DrawRectangle(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), color);
+        if (box.flags.clickable and is_hovering) {
+            mouse_hovering_clickable = true;
+        }
+
+        raylib.DrawRectangle( //
+            @floatToInt(i32, box.computed_pos.x), //
+            @floatToInt(i32, box.computed_pos.y), //
+            @floatToInt(i32, box.computed_size.x), //
+            @floatToInt(i32, box.computed_size.y), //
+            color //
+        );
     }
     if (box.flags.drawBorder) {
-        raylib.DrawRectangleLines(@floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), @floatToInt(i32, box.computed_size.x), @floatToInt(i32, box.computed_size.y), box.style.border_color);
+        raylib.DrawRectangleLines( //
+            @floatToInt(i32, box.computed_pos.x), //
+            @floatToInt(i32, box.computed_pos.y), //
+            @floatToInt(i32, box.computed_size.x), //
+            @floatToInt(i32, box.computed_size.y), //
+            box.style.border_color //
+        );
     }
     if (box.flags.drawText) {
-        raylib.DrawText(box.label, @floatToInt(i32, box.computed_pos.x), @floatToInt(i32, box.computed_pos.y), box.style.text_size, box.style.text_color);
+        raylib.DrawText( //
+            box.label, //
+            @floatToInt(i32, box.computed_pos.x) + box.style.text_padding, //
+            @floatToInt(i32, box.computed_pos.y) + box.style.text_padding, //
+            box.style.text_size, //
+            box.style.text_color //
+        );
     }
 
     // draw children
     const children = CountChildren(box);
     if (children > 0) {
-        const siblings = children - 1;
-        var index: u32 = 0;
         var child = box.first;
         while (child) |c| {
-            DrawUI(c, box, index, siblings, box.computed_pos, box.computed_size);
-            index += 1;
+            DrawUI(c);
 
             if (child == box.last) break;
 
