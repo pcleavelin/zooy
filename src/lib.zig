@@ -27,7 +27,13 @@ pub const UI_Flags = packed struct(u5) {
     drawBackground: bool = false,
 };
 
-pub const UI_Layout = union(enum) { fitToText, fitToChildren, fill, exactSize: Vec2 };
+pub const UI_Layout = union(enum) {
+    fitToText,
+    fitToChildren,
+    fill,
+    percentOfParent: Vec2,
+    exactSize: Vec2,
+};
 
 pub const UI_Direction = enum {
     leftToRight,
@@ -358,41 +364,32 @@ pub fn PopStyle() void {
     _ = current_style.popOrNull();
 }
 
-pub fn MakeButton(label: [:0]const u8) !bool {
+pub fn MakeButtonWithLayout(label: [:0]const u8, layout: UI_Layout) !bool {
     return try MakeBox(label, .{
         .clickable = true,
         .hoverable = true,
         .drawText = true,
         .drawBackground = true,
-    }, .leftToRight, .fitToText);
+    }, .leftToRight, layout);
+}
+
+pub fn MakeButton(label: [:0]const u8) !bool {
+    return try MakeButtonWithLayout(label, .fitToText);
+}
+
+pub fn MakeLabelWithLayout(label: [:0]const u8, layout: UI_Layout) !void {
+    _ = try MakeBox(label, .{
+        .drawText = true,
+    }, .leftToRight, layout);
 }
 
 pub fn MakeLabel(label: [:0]const u8) !void {
-    _ = try MakeBox(label, .{
-        .drawText = true,
-    }, .leftToRight, .fitToText);
+    _ = try MakeLabelWithLayout(label, .fitToText);
 }
 
-pub fn ComputeLayout(box: *UI_Box) Vec2 {
-    if (box.parent) |p| {
-        box.computed_size = p.computed_size;
-
-        if (box.prev) |prev| {
-            box.computed_pos = Vec2{ .x = switch (p.direction) {
-                .leftToRight => prev.computed_pos.x + prev.computed_size.x,
-                .topToBottom => prev.computed_pos.x,
-                .rightToLeft, .bottomToTop => unreachable,
-            }, .y = switch (p.direction) {
-                .leftToRight => prev.computed_pos.y,
-                .topToBottom => prev.computed_pos.y + prev.computed_size.y,
-                .rightToLeft, .bottomToTop => unreachable,
-            } };
-        } else {
-            box.computed_pos = p.computed_pos;
-        }
-    }
-
+fn ComputeChildrenSize(box: *UI_Box) Vec2 {
     var total_size = Vec2{ .x = 0, .y = 0 };
+
     // TODO: make this block an iterator
     const children = CountChildren(box);
     if (children > 0) {
@@ -426,63 +423,120 @@ pub fn ComputeLayout(box: *UI_Box) Vec2 {
         }
     }
 
+    return total_size;
+}
+
+fn ComputeSiblingSize(box: *UI_Box) Vec2 {
+    // TODO: get _all_ sibling sizes
+    //       (not just the _next_ ones, but also don't forget to not infinitly recurse)
+    // get siblings size so we know to big to get
+    var total_sibling_size = Vec2{ .x = 0, .y = 0 };
+    var n = box.next;
+    while (n) |next| {
+        const sibling_size = ComputeLayout(next);
+
+        switch (box.direction) {
+            .leftToRight => {
+                total_sibling_size.x += sibling_size.x;
+                if (sibling_size.y > total_sibling_size.y) {
+                    total_sibling_size.y = sibling_size.y;
+                }
+            },
+            .topToBottom => {
+                total_sibling_size.y += sibling_size.y;
+                if (sibling_size.x > total_sibling_size.x) {
+                    total_sibling_size.x = sibling_size.x;
+                }
+            },
+            .rightToLeft, .bottomToTop => {},
+        }
+
+        if (box.parent) |p| {
+            if (next == p.last) break;
+        }
+
+        n = next.next;
+    }
+
+    return total_sibling_size;
+}
+
+pub fn ComputeLayout(box: *UI_Box) Vec2 {
+    if (box.parent) |p| {
+        box.computed_size = p.computed_size;
+
+        if (box.prev) |prev| {
+            box.computed_pos = Vec2{ .x = switch (p.direction) {
+                .leftToRight => prev.computed_pos.x + prev.computed_size.x,
+                .topToBottom => prev.computed_pos.x,
+                .rightToLeft, .bottomToTop => unreachable,
+            }, .y = switch (p.direction) {
+                .leftToRight => prev.computed_pos.y,
+                .topToBottom => prev.computed_pos.y + prev.computed_size.y,
+                .rightToLeft, .bottomToTop => unreachable,
+            } };
+        } else {
+            box.computed_pos = p.computed_pos;
+        }
+    }
+
     switch (box.layout) {
         .fitToText => {
             box.computed_size = Vec2{
                 .x = @intToFloat(f32, raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2),
                 .y = @intToFloat(f32, box.style.text_size + box.style.text_padding * 2),
             };
+
+            _ = ComputeChildrenSize(box);
         },
         .fitToChildren => {
-            box.computed_size = total_size;
+            // TODO: chicken before the egg :sigh:
+            box.computed_size = ComputeChildrenSize(box);
+            //box.computed_size = total_size;
         },
         .fill => {
-            // get siblings size so we know to big to get
-            var total_sibling_size = Vec2{ .x = 0, .y = 0 };
-            var n = box.next;
-            while (n) |next| {
-                const sibling_size = ComputeLayout(next);
-
-                switch (box.direction) {
-                    .leftToRight => {
-                        total_sibling_size.x += sibling_size.x;
-                        if (sibling_size.y > total_sibling_size.y) {
-                            total_sibling_size.y = sibling_size.y;
-                        }
-                    },
-                    .topToBottom => {
-                        total_sibling_size.y += sibling_size.y;
-                        if (sibling_size.x > total_sibling_size.x) {
-                            total_sibling_size.x = sibling_size.x;
-                        }
-                    },
-                    .rightToLeft, .bottomToTop => {},
-                }
-
-                if (box.parent) |p| {
-                    if (next == p.last) break;
-                }
-
-                n = next.next;
-            }
+            const total_sibling_size = ComputeSiblingSize(box);
 
             if (box.parent) |p| {
                 box.computed_size = Vec2{
                     .x = switch (p.direction) {
                         .leftToRight => p.computed_size.x - total_sibling_size.x - box.computed_pos.x,
-                        .topToBottom => total_sibling_size.x,
+                        .topToBottom => if (total_sibling_size.x == 0) p.computed_size.x else total_sibling_size.x,
                         .rightToLeft, .bottomToTop => unreachable,
                     },
                     .y = switch (p.direction) {
-                        .leftToRight => total_sibling_size.y,
+                        .leftToRight => if (total_sibling_size.y == 0) p.computed_size.y else total_sibling_size.y,
                         .topToBottom => p.computed_size.y - total_sibling_size.y - box.computed_pos.y,
                         .rightToLeft, .bottomToTop => unreachable,
                     },
                 };
             } else {
                 // TODO: somehow need to get these values
-                box.computed_size = Vec2{ .x = 1280, .y = 720 };
+                //box.computed_size = Vec2{ .x = 1280, .y = 720 };
             }
+
+            _ = ComputeChildrenSize(box);
+        },
+        .percentOfParent => |size| {
+            //const total_sibling_size = ComputeSiblingSize(box);
+
+            // TODO: fix chicken and egg problem of needing to know the parent's computed size
+            if (box.parent) |p| {
+                box.computed_size = Vec2{
+                    .x = switch (p.direction) { //
+                        .leftToRight => p.computed_size.x * size.x,
+                        .topToBottom => p.computed_size.x, //if (total_sibling_size.x == 0) @intToFloat(f32, raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2) else total_sibling_size.x,
+                        .rightToLeft, .bottomToTop => unreachable,
+                    },
+                    .y = switch (p.direction) {
+                        .leftToRight => @intToFloat(f32, box.style.text_size + box.style.text_padding * 2),
+                        .topToBottom => p.computed_size.y * size.y,
+                        .rightToLeft, .bottomToTop => unreachable,
+                    },
+                };
+            }
+
+            _ = ComputeChildrenSize(box);
         },
         .exactSize => |_| unreachable,
     }
@@ -491,13 +545,13 @@ pub fn ComputeLayout(box: *UI_Box) Vec2 {
 }
 
 pub fn DrawUI(box: *UI_Box) void {
-    if (box.flags.drawBackground) {
-        const is_hovering = TestBoxHover(box);
-        const color = if (box.flags.hoverable and is_hovering) box.style.hover_color else box.style.color;
+    const is_hovering = TestBoxHover(box);
+    if (box.flags.clickable and is_hovering) {
+        mouse_hovering_clickable = true;
+    }
 
-        if (box.flags.clickable and is_hovering) {
-            mouse_hovering_clickable = true;
-        }
+    if (box.flags.drawBackground) {
+        const color = if (box.flags.hoverable and is_hovering) box.style.hover_color else box.style.color;
 
         raylib.DrawRectangle( //
             @floatToInt(i32, box.computed_pos.x), //
