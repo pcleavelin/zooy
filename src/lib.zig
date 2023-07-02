@@ -3,6 +3,7 @@ const std = @import("std");
 // TODO: abstract raylib away to allow for consumers to use whatever they want.
 // I'm also rexporting here because the zig build system hurts
 pub const raylib = @import("raylib");
+pub const components = @import("components.zig");
 
 // TODO: don't just make these public
 pub var box_allocator: std.mem.Allocator = undefined;
@@ -76,7 +77,7 @@ pub const UI_Box = struct {
     layout: UI_Layout,
 
     /// the label?
-    label: [:0]const u8,
+    label: [:0]u8,
 
     /// the final computed position and size of this primitive (in pixels)
     computed_pos: Vec2,
@@ -121,7 +122,7 @@ fn CountSiblings(box: *UI_Box) u32 {
 }
 
 fn TestBoxHover(box: *UI_Box) bool {
-    return @intToFloat(f32, mouse_x) >= box.computed_pos.x and @intToFloat(f32, mouse_x) <= box.computed_pos.x + box.computed_size.x and @intToFloat(f32, mouse_y) >= box.computed_pos.y and @intToFloat(f32, mouse_y) <= box.computed_pos.y + box.computed_size.y;
+    return @as(f32, @floatFromInt(mouse_x)) >= box.computed_pos.x and @as(f32, @floatFromInt(mouse_x)) <= box.computed_pos.x + box.computed_size.x and @as(f32, @floatFromInt(mouse_y)) >= box.computed_pos.y and @as(f32, @floatFromInt(mouse_y)) <= box.computed_pos.y + box.computed_size.y;
 }
 
 fn TestBoxClick(box: *UI_Box) bool {
@@ -163,12 +164,12 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction, la
                 current_box = next;
             } else {
                 // Invalid cache, delete next sibling while retaining the following one
-                std.debug.print("make_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ next.label, label });
+                //std.debug.print("make_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ next.label, label });
                 const following_sibling = next.next;
                 DeleteBoxChildren(next, false);
 
                 next.* = UI_Box{
-                    .label = label,
+                    .label = @constCast(label),
                     .flags = flags,
                     .direction = direction,
                     .style = current_style.getLast(),
@@ -190,10 +191,10 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction, la
             }
         } else {
             // No existing cache, create new box
-            std.debug.print("make_box: allocating new box: {s}\n", .{label});
+            //std.debug.print("make_box: allocating new box: {s}\n", .{label});
             var new_box = try box_allocator.create(UI_Box);
             new_box.* = UI_Box{
-                .label = label,
+                .label = @constCast(label),
                 .flags = flags,
                 .direction = direction,
                 .style = current_style.getLast(),
@@ -215,10 +216,10 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction, la
             }
         }
     } else {
-        std.debug.print("make_box: allocating new box: {s}\n", .{label});
+        //std.debug.print("make_box: allocating new box: {s}\n", .{label});
         var new_box = try box_allocator.create(UI_Box);
         new_box.* = UI_Box{
-            .label = label,
+            .label = @constCast(label),
             .flags = flags,
             .direction = direction,
             .style = current_style.getLast(),
@@ -274,12 +275,12 @@ pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction, la
                 }
             } else {
                 // Invalid cache
-                std.debug.print("push_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ first.label, label });
+                //std.debug.print("push_box: invalidating cache for '{s}' when making new box '{s}'\n", .{ first.label, label });
                 const following_sibling = first.next;
                 DeleteBoxChildren(first, false);
 
                 first.* = UI_Box{
-                    .label = label,
+                    .label = @constCast(label),
                     .flags = flags,
                     .direction = direction,
                     .style = current_style.getLast(),
@@ -300,10 +301,10 @@ pub fn PushBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction, la
                 }
             }
         } else {
-            std.debug.print("push_box: allocating new box: {s}\n", .{label});
+            //std.debug.print("push_box: allocating new box: {s}\n", .{label});
             var new_box = try box_allocator.create(UI_Box);
             new_box.* = UI_Box{
-                .label = label,
+                .label = @constCast(label),
                 .flags = flags,
                 .direction = direction,
                 .style = current_style.getLast(),
@@ -483,8 +484,8 @@ pub fn ComputeLayout(box: *UI_Box) Vec2 {
     switch (box.layout) {
         .fitToText => {
             box.computed_size = Vec2{
-                .x = @intToFloat(f32, raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2),
-                .y = @intToFloat(f32, box.style.text_size + box.style.text_padding * 2),
+                .x = @floatFromInt(raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2),
+                .y = @floatFromInt(box.style.text_size + box.style.text_padding * 2),
             };
 
             _ = ComputeChildrenSize(box);
@@ -525,11 +526,11 @@ pub fn ComputeLayout(box: *UI_Box) Vec2 {
                 box.computed_size = Vec2{
                     .x = switch (p.direction) { //
                         .leftToRight => p.computed_size.x * size.x,
-                        .topToBottom => p.computed_size.x, //if (total_sibling_size.x == 0) @intToFloat(f32, raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2) else total_sibling_size.x,
+                        .topToBottom => p.computed_size.x, //if (total_sibling_size.x == 0) @floatFromInt(raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2) else total_sibling_size.x,
                         .rightToLeft, .bottomToTop => unreachable,
                     },
                     .y = switch (p.direction) {
-                        .leftToRight => @intToFloat(f32, box.style.text_size + box.style.text_padding * 2),
+                        .leftToRight => @floatFromInt(box.style.text_size + box.style.text_padding * 2),
                         .topToBottom => p.computed_size.y * size.y,
                         .rightToLeft, .bottomToTop => unreachable,
                     },
@@ -554,27 +555,27 @@ pub fn DrawUI(box: *UI_Box) void {
         const color = if (box.flags.hoverable and is_hovering) box.style.hover_color else box.style.color;
 
         raylib.DrawRectangle( //
-            @floatToInt(i32, box.computed_pos.x), //
-            @floatToInt(i32, box.computed_pos.y), //
-            @floatToInt(i32, box.computed_size.x), //
-            @floatToInt(i32, box.computed_size.y), //
+            @intFromFloat(box.computed_pos.x), //
+            @intFromFloat(box.computed_pos.y), //
+            @intFromFloat(box.computed_size.x), //
+            @intFromFloat(box.computed_size.y), //
             color //
         );
     }
     if (box.flags.drawBorder) {
         raylib.DrawRectangleLines( //
-            @floatToInt(i32, box.computed_pos.x), //
-            @floatToInt(i32, box.computed_pos.y), //
-            @floatToInt(i32, box.computed_size.x), //
-            @floatToInt(i32, box.computed_size.y), //
+            @intFromFloat(box.computed_pos.x), //
+            @intFromFloat(box.computed_pos.y), //
+            @intFromFloat(box.computed_size.x), //
+            @intFromFloat(box.computed_size.y), //
             box.style.border_color //
         );
     }
     if (box.flags.drawText) {
         raylib.DrawText( //
             box.label, //
-            @floatToInt(i32, box.computed_pos.x) + box.style.text_padding, //
-            @floatToInt(i32, box.computed_pos.y) + box.style.text_padding, //
+            @as(i32, @intFromFloat(box.computed_pos.x)) + box.style.text_padding, //
+            @as(i32, @intFromFloat(box.computed_pos.y)) + box.style.text_padding, //
             box.style.text_size, //
             box.style.text_color //
         );
