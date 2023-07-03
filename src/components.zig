@@ -10,7 +10,7 @@ pub const Grid = struct {
         try ui.PushStyle(.{ //
             .color = raylib.WHITE, //
             .text_color = .{ .r = 0x18, .g = 0x90, .b = 0xff, .a = 0xff }, //
-            .text_size = 10, //
+            .text_size = 12, //
             .text_padding = 12, //
         });
         defer ui.PopStyle();
@@ -32,21 +32,29 @@ pub const Grid = struct {
     }
 
     pub fn MakeGrid(comptime T: type, columns: [][:0]const u8, data: []T, MakeBody: *const fn (data: *const T, size: i32) anyerror!void) !void {
+        _ = try ui.PushBox("GridContainer", .{ .drawBackground = true }, .topToBottom, .fill);
+        defer ui.PopBox();
+
         try MakeColumnHeader(columns);
 
-        try ui.PushStyle(.{ //
-            .color = raylib.WHITE, //
-            .hover_color = raylib.LIGHTGRAY, //
-            .text_color = raylib.BLACK, //
-            .text_size = 10, //
-            .text_padding = 12, //
-        });
-        for (data) |item| {
-            _ = try ui.PushBox("GridItem", .{ .drawBackground = true, .drawBorder = false, .hoverable = true }, .leftToRight, .fitToChildren);
+        {
+            _ = try ui.PushBox("Grid", .{ .drawBackground = true, .scrollable = true }, .topToBottom, .fill);
             defer ui.PopBox();
 
-            try MakeBody(&item, @as(i32, @intCast(columns.len)));
+            try ui.PushStyle(.{ //
+                .color = raylib.WHITE, //
+                .hover_color = raylib.LIGHTGRAY, //
+                .text_color = raylib.BLACK, //
+                .text_size = 12, //
+                .text_padding = 12, //
+            });
+            for (data) |item| {
+                _ = try ui.PushBox("GridItem", .{ .drawBackground = true, .drawBorder = false, .hoverable = true }, .leftToRight, .fitToChildren);
+                defer ui.PopBox();
+
+                try MakeBody(&item, @as(i32, @intCast(columns.len)));
+            }
+            defer ui.PopStyle();
         }
-        defer ui.PopStyle();
     }
 };

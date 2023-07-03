@@ -15,14 +15,23 @@ pub var current_style: std.ArrayList(UI_Style) = undefined;
 pub var pushing_box: bool = false;
 pub var popping_box: bool = false;
 
+// PLEASE DON'T DO THIS
+pub var font20: raylib.Font = undefined;
+pub var font10: raylib.Font = undefined;
+
 pub var mouse_x: i32 = 0;
 pub var mouse_y: i32 = 0;
+// TODO: do this better
+pub var mouse_scroll: f32 = 0;
 pub var mouse_released: bool = false;
 pub var mouse_hovering_clickable: bool = false;
 
-pub const UI_Flags = packed struct(u5) {
+const scroll_speed: f32 = 1.125;
+
+pub const UI_Flags = packed struct(u6) {
     clickable: bool = false,
     hoverable: bool = false,
+    scrollable: bool = false,
     drawText: bool = false,
     drawBorder: bool = false,
     drawBackground: bool = false,
@@ -76,12 +85,21 @@ pub const UI_Box = struct {
     style: UI_Style,
     layout: UI_Layout,
 
-    /// the label?
+    /// the label
     label: [:0]u8,
 
     /// the final computed position and size of this primitive (in pixels)
     computed_pos: Vec2,
     computed_size: Vec2,
+
+    // whether or not this primitive is currently being interacted with
+    active: bool = false,
+    // whether or not this primitive is *about* to be interacted with
+    hot: bool = false,
+
+    // specific scrollable settings
+    scroll_fract: f32 = 0,
+    scroll_top: ?*UI_Box = null,
 };
 
 fn CountChildren(box: *UI_Box) u32 {
@@ -127,6 +145,55 @@ fn TestBoxHover(box: *UI_Box) bool {
 
 fn TestBoxClick(box: *UI_Box) bool {
     return mouse_released and TestBoxHover(box);
+}
+
+fn ScrollBox(box: *UI_Box) void {
+    if (TestBoxHover(box)) {
+        if (box.scroll_top == null) {
+            box.scroll_top = box.first;
+        }
+
+        if (box.scroll_top) |top| {
+            if ((mouse_scroll > 0 and top.prev != null) or (mouse_scroll < 0 and top.next != null) or box.scroll_fract != 0) {
+                box.scroll_fract -= mouse_scroll * scroll_speed;
+            }
+        }
+
+        const n = std.math.modf(box.scroll_fract);
+        box.scroll_fract = n.fpart;
+
+        if (n.ipart > 0) {
+            var index = n.ipart;
+            var child = box.scroll_top;
+            while (child) |c| {
+                if (index <= 0) break;
+
+                if (c.next) |next| {
+                    child = next;
+                }
+
+                index -= 1;
+            }
+
+            box.scroll_top = child;
+        } else if (box.scroll_fract < 0.0) {
+            box.scroll_fract = 1 + box.scroll_fract;
+
+            var index = -n.ipart;
+            var child = box.scroll_top;
+            while (child) |c| {
+                if (c.prev) |prev| {
+                    child = prev;
+                }
+
+                if (index <= 0) break;
+
+                index -= 1;
+            }
+
+            box.scroll_top = child;
+        }
+    }
 }
 
 pub fn DeleteBoxChildren(box: *UI_Box, should_destroy: bool) void {
@@ -240,6 +307,9 @@ pub fn MakeBox(label: [:0]const u8, flags: UI_Flags, direction: UI_Direction, la
     if (current_box) |box| {
         if (box.flags.clickable) {
             return TestBoxClick(box);
+        }
+        if (box.flags.scrollable) {
+            ScrollBox(box);
         }
     }
 
@@ -481,65 +551,90 @@ pub fn ComputeLayout(box: *UI_Box) Vec2 {
         }
     }
 
-    switch (box.layout) {
-        .fitToText => {
-            box.computed_size = Vec2{
-                .x = @floatFromInt(raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2),
-                .y = @floatFromInt(box.style.text_size + box.style.text_padding * 2),
-            };
-
-            _ = ComputeChildrenSize(box);
-        },
-        .fitToChildren => {
-            // TODO: chicken before the egg :sigh:
-            box.computed_size = ComputeChildrenSize(box);
-            //box.computed_size = total_size;
-        },
-        .fill => {
-            const total_sibling_size = ComputeSiblingSize(box);
-
-            if (box.parent) |p| {
+    var compute_children = blk: {
+        switch (box.layout) {
+            .fitToText => {
                 box.computed_size = Vec2{
-                    .x = switch (p.direction) {
-                        .leftToRight => p.computed_size.x - total_sibling_size.x - box.computed_pos.x,
-                        .topToBottom => if (total_sibling_size.x == 0) p.computed_size.x else total_sibling_size.x,
-                        .rightToLeft, .bottomToTop => unreachable,
-                    },
-                    .y = switch (p.direction) {
-                        .leftToRight => if (total_sibling_size.y == 0) p.computed_size.y else total_sibling_size.y,
-                        .topToBottom => p.computed_size.y - total_sibling_size.y - box.computed_pos.y,
-                        .rightToLeft, .bottomToTop => unreachable,
-                    },
+                    .x = @floatFromInt(raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2),
+                    .y = @floatFromInt(box.style.text_size + box.style.text_padding * 2),
                 };
-            } else {
-                // TODO: somehow need to get these values
-                //box.computed_size = Vec2{ .x = 1280, .y = 720 };
+
+                //_ = ComputeChildrenSize(box);
+                break :blk true;
+            },
+            .fitToChildren => {
+                // TODO: chicken before the egg :sigh:
+                box.computed_size = ComputeChildrenSize(box);
+                //box.computed_size = total_size;
+
+                break :blk false;
+            },
+            .fill => {
+                const total_sibling_size = ComputeSiblingSize(box);
+
+                if (box.parent) |p| {
+                    box.computed_size = Vec2{
+                        .x = switch (p.direction) {
+                            .leftToRight => p.computed_size.x - total_sibling_size.x - box.computed_pos.x,
+                            .topToBottom => if (total_sibling_size.x == 0) p.computed_size.x else total_sibling_size.x,
+                            .rightToLeft, .bottomToTop => unreachable,
+                        },
+                        .y = switch (p.direction) {
+                            .leftToRight => if (total_sibling_size.y == 0) p.computed_size.y else total_sibling_size.y,
+                            .topToBottom => p.computed_size.y - total_sibling_size.y - box.computed_pos.y,
+                            .rightToLeft, .bottomToTop => unreachable,
+                        },
+                    };
+                } else {
+                    // TODO: somehow need to get these values
+                    //box.computed_size = Vec2{ .x = 1280, .y = 720 };
+                }
+
+                //_ = ComputeChildrenSize(box);
+                break :blk true;
+            },
+            .percentOfParent => |size| {
+                //const total_sibling_size = ComputeSiblingSize(box);
+
+                // TODO: fix chicken and egg problem of needing to know the parent's computed size
+                if (box.parent) |p| {
+                    box.computed_size = Vec2{
+                        .x = switch (p.direction) { //
+                            .leftToRight => p.computed_size.x * size.x,
+                            .topToBottom => p.computed_size.x, //if (total_sibling_size.x == 0) @floatFromInt(raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2) else total_sibling_size.x,
+                            .rightToLeft, .bottomToTop => unreachable,
+                        },
+                        .y = switch (p.direction) {
+                            .leftToRight => @floatFromInt(box.style.text_size + box.style.text_padding * 2),
+                            .topToBottom => p.computed_size.y * size.y,
+                            .rightToLeft, .bottomToTop => unreachable,
+                        },
+                    };
+                }
+
+                //_ = ComputeChildrenSize(box);
+                break :blk true;
+            },
+            .exactSize => |_| unreachable,
+        }
+    };
+
+    if (box.parent) |p| {
+        if (p.scroll_top) |top| {
+            if (box == top) {
+                // TODO: switch on direction
+                box.computed_pos.x = p.computed_pos.x;
+                box.computed_pos.y = p.computed_pos.y - p.scroll_fract * box.computed_size.y;
             }
+            // TODO: figure check and egg problem
+            //_ = ComputeChildrenSize(box);
+            compute_children = true;
+        }
+    }
 
-            _ = ComputeChildrenSize(box);
-        },
-        .percentOfParent => |size| {
-            //const total_sibling_size = ComputeSiblingSize(box);
-
-            // TODO: fix chicken and egg problem of needing to know the parent's computed size
-            if (box.parent) |p| {
-                box.computed_size = Vec2{
-                    .x = switch (p.direction) { //
-                        .leftToRight => p.computed_size.x * size.x,
-                        .topToBottom => p.computed_size.x, //if (total_sibling_size.x == 0) @floatFromInt(raylib.MeasureText(box.label, box.style.text_size) + box.style.text_padding * 2) else total_sibling_size.x,
-                        .rightToLeft, .bottomToTop => unreachable,
-                    },
-                    .y = switch (p.direction) {
-                        .leftToRight => @floatFromInt(box.style.text_size + box.style.text_padding * 2),
-                        .topToBottom => p.computed_size.y * size.y,
-                        .rightToLeft, .bottomToTop => unreachable,
-                    },
-                };
-            }
-
-            _ = ComputeChildrenSize(box);
-        },
-        .exactSize => |_| unreachable,
+    // TODO: this is what is causing the columns to shrink, something to do with the parent size changing between the previous call in .fitToChildren and this one
+    if (compute_children) {
+        _ = ComputeChildrenSize(box);
     }
 
     return box.computed_size;
@@ -551,12 +646,17 @@ pub fn DrawUI(box: *UI_Box) void {
         mouse_hovering_clickable = true;
     }
 
+    const pos_x: i32 = @intFromFloat(box.computed_pos.x);
+    const pos_y: i32 = @intFromFloat(box.computed_pos.y);
+    const size_x: i32 = @intFromFloat(box.computed_size.x);
+    const size_y: i32 = @intFromFloat(box.computed_size.y);
+
     if (box.flags.drawBackground) {
         const color = if (box.flags.hoverable and is_hovering) box.style.hover_color else box.style.color;
 
         raylib.DrawRectangle( //
-            @intFromFloat(box.computed_pos.x), //
-            @intFromFloat(box.computed_pos.y), //
+            pos_x, //
+            pos_y, //
             @intFromFloat(box.computed_size.x), //
             @intFromFloat(box.computed_size.y), //
             color //
@@ -564,33 +664,74 @@ pub fn DrawUI(box: *UI_Box) void {
     }
     if (box.flags.drawBorder) {
         raylib.DrawRectangleLines( //
-            @intFromFloat(box.computed_pos.x), //
-            @intFromFloat(box.computed_pos.y), //
+            pos_x, //
+            pos_y, //
             @intFromFloat(box.computed_size.x), //
             @intFromFloat(box.computed_size.y), //
             box.style.border_color //
         );
     }
+    //  DrawTextEx(Font font, const char *text, Vector2 position, float fontSize, float spacing, Color tint)
     if (box.flags.drawText) {
-        raylib.DrawText( //
+        var bb: f32 = 0;
+        var color: raylib.Color = box.style.text_color;
+        if (box.parent) |p| {
+            if (p.scroll_top != null and p.scroll_top == box) {
+                bb = 36;
+                color = raylib.RED;
+            }
+        }
+        raylib.DrawTextEx( //
+            if (box.style.text_size == 20) font20 else if (box.style.text_size == 12) font10 else font10, //
             box.label, //
-            @as(i32, @intFromFloat(box.computed_pos.x)) + box.style.text_padding, //
-            @as(i32, @intFromFloat(box.computed_pos.y)) + box.style.text_padding, //
-            box.style.text_size, //
-            box.style.text_color //
+            .{
+            .x = box.computed_pos.x + @as(f32, @floatFromInt(box.style.text_padding)), //
+            .y = box.computed_pos.y - bb + @as(f32, @floatFromInt(box.style.text_padding)), //
+        }, //
+            @as(f32, @floatFromInt(box.style.text_size)), //
+            1.0, color //
         );
     }
 
     // draw children
     const children = CountChildren(box);
     if (children > 0) {
-        var child = box.first;
+        var child = blk: {
+            if (box.flags.scrollable) {
+                if (box.scroll_top) |top| {
+                    break :blk top;
+                }
+            }
+
+            break :blk box.first;
+        };
+
+        var child_size: f32 = 0;
+        // TODO: replace with non-raylib function, also figure out why this doesn't clip text drawn with `DrawText`
+        raylib.BeginScissorMode(pos_x, pos_y, size_x, size_y);
         while (child) |c| {
             DrawUI(c);
 
             if (child == box.last) break;
 
+            if (box.flags.scrollable) {
+                switch (box.direction) {
+                    .leftToRight => {
+                        child_size += c.computed_size.x;
+                        // TODO: don't multiply this by two, use the last child size or something
+                        if (child_size > box.computed_size.x * 2) break;
+                    },
+                    .rightToLeft, .bottomToTop => unreachable,
+                    .topToBottom => {
+                        child_size += c.computed_size.y;
+                        // TODO: don't multiply this by two, use the last child size or something
+                        if (child_size > box.computed_size.y * 2) break;
+                    },
+                }
+            }
+
             child = c.next;
         }
+        raylib.EndScissorMode();
     }
 }
